@@ -25,15 +25,18 @@ void loop()
 {
   if (timerTest < DELAY_TEST)
   {
-    if (mButton.toProcess())
+    if (mButton.toProcessM())
     {
       Serial.print(mButton.getNum());
       switch (mButton.getAction())
       {
-        case 1:
+        case BA_SHORT_PRESS:
           Serial.println(" short pressed");
           break;
-        case 2:
+        case BA_DOUBLE_PRESS:
+          Serial.println(" double pressed");
+          break;
+        case BA_LONG_PRESS:
           Serial.println(" long pressed");
           break;  
       }

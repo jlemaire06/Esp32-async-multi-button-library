@@ -1,137 +1,156 @@
 // MButton.cpp
 
 #include "MButton.h"
-#include <Ticker.h>
+
+/***********************************************************************************
+  MButton class
+***********************************************************************************/
 
 // Implement static members
-volatile int MButton::_num;        
-volatile bool MButton::_toProcess; 
-volatile int MButton::_action;     
-bool MButton::_okButton;           
-int MButton::_oldNum;              
-unsigned long MButton::_oldTime;   
-int MButton::_oldLevel;              
-Ticker MButton::_timer; 
+volatile int MButton::num;
+volatile bool MButton::toProcess;
+volatile ButtonAction MButton::action;
+bool MButton::okButton;
+int MButton::oldNum;
+int MButton::oldLevel;
+Ticker MButton::timerDebounce;
+Ticker MButton::timerDoublePress;
+Ticker MButton::timerLongPress;
+bool MButton::timerDoublePressActive;
+bool MButton::timerLongPressActive;
 
 MButton::MButton()
 {
-  _okButton = true;
-  _oldLevel = HIGH;
-  _toProcess = false;
+  okButton = true;
+  oldLevel = HIGH;
+  toProcess = false;
+  timerDoublePressActive = false;
+  timerLongPressActive = false;
 }
 
-void MButton::begin(int noMButtons, ...)
-{ 
-	va_list arg;
-	va_start(arg, noMButtons);
-	for (uint8_t i = 0; i < noMButtons; i++)
-	{
+void MButton::begin(int nbMButtons, ...)
+{
+  va_list arg;
+  va_start(arg, nbMButtons);
+  for (uint8_t i = 0; i < nbMButtons; i++)
+  {
     uint8_t num = va_arg(arg, int);
     pinMode(num, INPUT_PULLUP);
     switch (num)
     {
-      case 12:
-        attachInterrupt(12, buttonInterrupt12, CHANGE);
-        break;
-      case 13:
-        attachInterrupt(13, buttonInterrupt13, CHANGE);
-        break;
+    case 13:
+      attachInterrupt(13, buttonInterrupt13, CHANGE);
+      break;
+    case 12:
+      attachInterrupt(12, buttonInterrupt12, CHANGE);
+      break;
       // Here can add attachments for other pins
     }
   }
 }
 
 void MButton::end()
-{ 
-  detachInterrupt(12); 
-  detachInterrupt(13); 
+{
+  detachInterrupt(12);
+  detachInterrupt(13);
   // Here can add detachments for other pins
-  _timer.detach(); 
-}
-
-int MButton::getNum()
-{
-  return _num;
-}
-
-int MButton::getAction()
-{
-  return _action;
-}
-
-bool MButton::toProcess()
-{
-  return _toProcess;
+  timerDebounce.detach();
+  timerDoublePress.detach();
+  timerLongPress.detach();
 }
 
 void MButton::processed()
 {
-  _toProcess = false; 
+  toProcess = false;
 }
+
 
 void IRAM_ATTR MButton::buttonInterrupt12()
 {
- if (_okButton && !_toProcess)  
+  if (okButton && !toProcess)
   {
-    _num = 12;
-    _okButton = false;
-    _timer.once_ms(DELAY_DEBOUNCE, timerInterrupt); 
+    num = 12;
+    okButton = false;
+    timerDebounce.once_ms(DELAY_DEBOUNCE, timerDebounceInterrupt);
   }
 }
 
 void IRAM_ATTR MButton::buttonInterrupt13()
 {
- if (_okButton && !_toProcess)  
+  if (okButton && !toProcess)
   {
-    _num = 13;
-    _okButton = false;
-    _timer.once_ms(DELAY_DEBOUNCE, timerInterrupt); 
+    num = 13;
+    okButton = false;
+    timerDebounce.once_ms(DELAY_DEBOUNCE, timerDebounceInterrupt);
   }
 }
 
-void MButton::timerInterrupt()
+void MButton::timerDebounceInterrupt()
 {
-  int level = digitalRead(_num);
-  if (!_toProcess)
+  int level = digitalRead(num);
+  if (!toProcess)
   {
-    if (_oldLevel == HIGH)
+    if (oldLevel == HIGH)
     {
       if (level == HIGH)
       {
-        // Short pressed
-        _action = 1; 
-        _toProcess = true;
+        if (timerDoublePressActive)
+        {
+          if (num != oldNum) num = oldNum; // Forbidden mixed case
+          else 
+          {
+            action = BA_DOUBLE_PRESS;
+            timerDoublePress.detach(); // Stop timer double press
+            timerDoublePressActive = false;
+            toProcess = true;
+          }
+        }
+        else // First short press
+        {
+          timerDoublePress.once_ms(DELAY_DOUBLE_PRESS, timerDoublePressInterrupt); // Activate timer double press
+          timerDoublePressActive = true;
+          oldNum = num;
+        }       
       }
-      else
+      else // Level == LOW 
       {
-        // May start a long press action
-        _oldNum = _num;  
-        _oldTime = millis();
-        _oldLevel = LOW;
+        timerLongPress.once_ms(DELAY_LONG_PRESS, timerLongPressInterrupt); // Activate timer long press
+        timerLongPressActive = true;     
+        oldNum = num;
+        oldLevel = LOW;
       }
     }
-    else if ((level == HIGH))
+    else // oldLevel = LOW
     {
-      if (_num != _oldNum)  // Forbidden mixed case
+      if ((level == HIGH))
       {
-        _num = _oldNum; 
+        if (num != oldNum) num = oldNum; // Forbidden mixed case
+        else 
+        {
+          if (!timerLongPressActive) action = BA_LONG_PRESS;
+          else // Maintained Short press
+          {
+            timerLongPress.detach(); // Stop timer long press
+            timerLongPressActive = false;
+            action = BA_SHORT_PRESS;
+          }
+          toProcess = true;
+          oldLevel = HIGH;
+        }
       }
-      else
-      {
-        if (millis() >= (_oldTime + DELAY_LONG_PRESS))
-        {
-           // Long press 
-          _action = 2; 
-        }
-        else
-        {
-          // Short press not long enough...
-          _action = 1;
-        }
-        _oldLevel = HIGH,
-        _toProcess = true;
-       }
-    }
+    } 
   }
-  _okButton = true; // Enable button interrupts
+  okButton = true; // Enable button interrupts
+}
+
+void MButton::timerDoublePressInterrupt()
+{
+  timerDoublePressActive = false;
+  action = BA_SHORT_PRESS;
+  toProcess = true;
+}
+
+void MButton::timerLongPressInterrupt()
+{
+  timerLongPressActive = false;
 }
